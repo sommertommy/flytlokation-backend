@@ -34,34 +34,28 @@ function createMailTransporter() {
   });
 }
 
-function buildLocationEmailText(items) {
-  const lines = [
-    "Ny varelokation registreret",
-    ""
-  ];
+function buildLocationEmailHtml(items) {
+  let html = `
+    <h2>Ny varelokation registreret</h2>
+  `;
 
-  items.forEach((item, index) => {
-    lines.push(`Vare ${index + 1}`);
-    lines.push(`Navn: ${item.title || "IKKE FUNDET I FEED"}`);
-    lines.push(`Stregkode: ${item.barcode}`);
-    lines.push(`Lokation: ${item.location}`);
-
-    if (item.brand) {
-      lines.push(`Brand: ${item.brand}`);
-    }
-
-    if (item.size) {
-      lines.push(`Størrelse: ${item.size}`);
-    }
-
-    if (item.id) {
-      lines.push(`Variant ID: ${item.id}`);
-    }
-
-    lines.push("");
+  items.forEach((item) => {
+    html += `
+      <div style="margin-bottom:20px;">
+        <div style="font-weight:bold; font-size:16px;">
+          ${item.title || "IKKE FUNDET I FEED"}
+        </div>
+        <div style="font-size:22px; margin-top:4px;">
+          Lokation: ${item.location}
+        </div>
+        <div style="font-size:12px; color:#666; margin-top:4px;">
+          Variant ID: ${item.id || "-"}
+        </div>
+      </div>
+    `;
   });
 
-  return lines.join("\n");
+  return html;
 }
 
 async function sendLocationEmail(items) {
@@ -74,7 +68,7 @@ async function sendLocationEmail(items) {
   }
 
   const subject = `Ny varelokation registreret (${items.length} varer)`;
-  const text = buildLocationEmailText(items);
+  const html = buildLocationEmailHtml(items);
 
   console.log("Forsøger at sende email...", {
     from,
@@ -87,7 +81,7 @@ async function sendLocationEmail(items) {
     from,
     to,
     subject,
-    text
+    html
   });
 
   console.log("Email sendt", {
