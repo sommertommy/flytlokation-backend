@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,6 +11,90 @@ let productIndex = {};
 let productCount = 0;
 let lastFeedUpdate = null;
 let feedLoadingPromise = null;
+
+function createMailTransporter() {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const secure = String(process.env.SMTP_SECURE || "false") === "true";
+
+  if (!host || !user || !pass) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: {
+      user,
+      pass
+    }
+  });
+}
+
+function buildLocationEmailText(items) {
+  const lines = [
+    "Ny varelokation registreret",
+    ""
+  ];
+
+  items.forEach((item, index) => {
+    lines.push(`Vare ${index + 1}`);
+    lines.push(`Navn: ${item.title || "IKKE FUNDET I FEED"}`);
+    lines.push(`Stregkode: ${item.barcode}`);
+    lines.push(`Lokation: ${item.location}`);
+
+    if (item.brand) {
+      lines.push(`Brand: ${item.brand}`);
+    }
+
+    if (item.size) {
+      lines.push(`Størrelse: ${item.size}`);
+    }
+
+    if (item.id) {
+      lines.push(`Variant ID: ${item.id}`);
+    }
+
+    lines.push("");
+  });
+
+  return lines.join("\n");
+}
+
+async function sendLocationEmail(items) {
+  const transporter = createMailTransporter();
+  const from = process.env.MAIL_FROM;
+  const to = process.env.MAIL_TO;
+
+  if (!transporter || !from || !to) {
+    throw new Error("Mail er ikke konfigureret. Mangler SMTP eller MAIL_FROM/MAIL_TO miljøvariabler.");
+  }
+
+  const subject = `Ny varelokation registreret (${items.length} varer)`;
+  const text = buildLocationEmailText(items);
+
+  console.log("Forsøger at sende email...", {
+    from,
+    to,
+    subject,
+    itemCount: items.length
+  });
+
+  const info = await transporter.sendMail({
+    from,
+    to,
+    subject,
+    text
+  });
+
+  console.log("Email sendt", {
+    messageId: info.messageId,
+    response: info.response
+  });
+}
 
 app.use(cors());
 app.use(express.json());
@@ -175,9 +260,12 @@ app.post("/send-locations", async (req, res) => {
 
     console.log("Resultat med varedata:", result);
 
+    await sendLocationEmail(result);
+    console.log("Email-funktionen er kørt færdig uden fejl.");
+
     res.json({
       success: true,
-      message: "Data modtaget og varer slået op",
+      message: "Data modtaget, varer slået op og email sendt",
       receivedCount: scans.length,
       items: result
     });
