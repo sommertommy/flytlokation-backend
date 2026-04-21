@@ -4,6 +4,12 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const FEED_URL = "https://files.channable.com/zPY8Lz2ruUG2WKjsrrUEvA==.xml";
+const FEED_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+let productIndex = {};
+let productCount = 0;
+let lastFeedUpdate = null;
+let feedLoadingPromise = null;
 
 app.use(cors());
 app.use(express.json());
@@ -36,7 +42,7 @@ function parseFeedItems(xml) {
   }));
 }
 
-async function findProductsByBarcodes(barcodes) {
+async function refreshFeedIndex() {
   const response = await fetch(FEED_URL);
 
   if (!response.ok) {
@@ -45,32 +51,67 @@ async function findProductsByBarcodes(barcodes) {
 
   const xml = await response.text();
   const allItems = parseFeedItems(xml);
+  const nextIndex = {};
 
-  return barcodes.map((barcode) => {
-    const product = allItems.find((item) => item.gtin === barcode);
-
-    if (!product) {
-      return {
-        barcode,
-        found: false,
-        title: "IKKE FUNDET I FEED",
-        brand: "",
-        size: "",
-        id: ""
-      };
+  allItems.forEach((item) => {
+    if (item.gtin) {
+      nextIndex[item.gtin] = item;
     }
-
-    return {
-      barcode,
-      found: true,
-      title: product.title,
-      brand: product.brand,
-      size: product.size,
-      id: product.id
-    };
   });
+
+  productIndex = nextIndex;
+  productCount = Object.keys(nextIndex).length;
+  lastFeedUpdate = new Date().toISOString();
+
+  console.log(`Feed indeks opdateret. ${productCount} varer indlæst.`);
 }
 
+async function ensureFeedIndexLoaded() {
+  if (productCount > 0) {
+    return;
+  }
+
+  if (!feedLoadingPromise) {
+    feedLoadingPromise = refreshFeedIndex()
+      .catch((error) => {
+        throw error;
+      })
+      .finally(() => {
+        feedLoadingPromise = null;
+      });
+  }
+
+  await feedLoadingPromise;
+}
+
+function findProductByBarcode(barcode) {
+  const product = productIndex[barcode];
+
+  if (!product) {
+    return {
+      barcode,
+      found: false,
+      title: "IKKE FUNDET I FEED",
+      brand: "",
+      size: "",
+      id: ""
+    };
+  }
+
+  return {
+    barcode,
+    found: true,
+    title: product.title,
+    brand: product.brand,
+    size: product.size,
+    id: product.id
+  };
+}
+
+async function findProductsByBarcodes(barcodes) {
+  await ensureFeedIndexLoaded();
+  return barcodes.map((barcode) => findProductByBarcode(barcode));
+}
 
 app.post("/lookup-product", async (req, res) => {
   try {
@@ -83,6 +124,7 @@ app.post("/lookup-product", async (req, res) => {
       });
     }
 
+    await ensureFeedIndexLoaded();
     const products = await findProductsByBarcodes([barcode]);
     const product = products[0];
 
@@ -113,6 +155,7 @@ app.post("/send-locations", async (req, res) => {
 
     console.log("Modtaget fra app:", scans);
 
+    await ensureFeedIndexLoaded();
     const barcodes = scans.map((scan) => scan.barcode);
     const products = await findProductsByBarcodes(barcodes);
 
@@ -148,6 +191,18 @@ app.post("/send-locations", async (req, res) => {
   }
 });
 
+refreshFeedIndex()
+  .catch((error) => {
+    console.error("Fejl ved første feed-opdatering:", error);
+  });
+
+setInterval(() => {
+  refreshFeedIndex().catch((error) => {
+    console.error("Fejl ved planlagt feed-opdatering:", error);
+  });
+}, FEED_REFRESH_INTERVAL_MS);
+
 app.listen(PORT, () => {
   console.log(`Server kører på http://localhost:${PORT}`);
+  console.log(`Seneste feed-opdatering: ${lastFeedUpdate || "ikke indlæst endnu"}`);
 });
