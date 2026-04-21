@@ -71,6 +71,42 @@ async function findProductsByBarcodes(barcodes) {
   });
 }
 
+
+app.post("/lookup-product", async (req, res) => {
+  try {
+    const barcode = req.body?.barcode;
+
+    if (!barcode) {
+      return res.status(400).json({
+        success: false,
+        message: "Mangler barcode"
+      });
+    }
+
+    const products = await findProductsByBarcodes([barcode]);
+    const product = products[0];
+
+    res.json({
+      success: true,
+      item: {
+        barcode,
+        found: product?.found || false,
+        title: product?.title || "IKKE FUNDET I FEED",
+        brand: product?.brand || "",
+        size: product?.size || "",
+        id: product?.id || ""
+      }
+    });
+  } catch (error) {
+    console.error("Fejl i /lookup-product:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 app.post("/send-locations", async (req, res) => {
   try {
     const scans = Array.isArray(req.body) ? req.body : [];
